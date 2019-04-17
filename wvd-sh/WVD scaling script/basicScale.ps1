@@ -234,7 +234,7 @@ elseif ($ScalingLogTable -eq $null)
     throw "An error ocurred trying to obtain table $ScalingLogTable in Storage Account $StorageAccountName at Resource Group $StorageAccountRG"
 }
 
-Add-TableLog -Message "Retrieving/Initializing owner record if it does not exist yet" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+#Add-TableLog -Message "Retrieving/Initializing owner record if it does not exist yet" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
 
 # Get owner record
 $PartitionKey = "ScalingOwnership"
@@ -276,31 +276,52 @@ if ($OwnerRecord.Status -eq ([HAStatuses]::Running))
         Add-TableLog -Message "Exiting due to execution in progress by another owner" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
         Exit 0
     }
-    elseif (($OwnerRecord.Owner -eq $HAOwnerName) -and ($OwnerRecord.CurrentActivityId -ne $ActivityId) -and ($LastUpdateInMinutes -lt $OwnerRecord.LongRunningTakeOverThresholdMin)) 
+    elseif (($OwnerRecord.Owner -eq $HAOwnerName) -and ($OwnerRecord.CurrentActivityId -ne $ActivityId) -and ($LastUpdateInMinutes -lt $OwnerRecord.OverThresholdMin)) 
     {
-        Add-TableLog -Message "Exiting due to execution in progress by same owner and this is a new process" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+        Add-TableLog -Message "Exiting due to execution in progress by same owner ($OwnerRecord.Owner) and this is a new process" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
         Exit 0
     }
     elseif ($LastUpdateInMinutes -gt $OwnerRecord.LongRunningTakeOverThresholdMin)
     {
         Add-TableLog -Message "Taking over from current owner $($OwnerRecord.Owner) due to staleness and last update being greater than long running threshold $($OwnerRecord.LongRunningTakeOverThresholdMin)" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+        $RecordProps.Status = ([HAStatuses]::Running).ToString()
+        $RecordProps.LastUpdateUTC = ([System.DateTime]::UtcNow)
         Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $RecordProps -UpdateExisting
     }
 }
-elseif (($OwnerRecord.Owner -ne $HAOwnerName) -and ($LastUpdateInMinutes -le $OwnerRecord.TakeOverThresholdMin)) 
-{
-    Add-TableLog -Message "Exiting due to last update from current owner is still whithin threshold" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
-    Exit 0
-}
 elseif ($LastUpdateInMinutes -gt $OwnerRecord.TakeOverThresholdMin) 
 {
-    Add-TableLog -Message "Taking over from current owner $($OwnerRecord.Owner) due to last update being greater than threshold $($OwnerRecord.TakeOverThresholdMin)" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+    if ($OwnerRecord.Owner -ne $HAOwnerName)
+    {
+        Add-TableLog -Message "Taking over from current owner $($OwnerRecord.Owner) due to last update being greater than threshold $($OwnerRecord.TakeOverThresholdMin)" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+    }
+    else
+    {
+        Add-TableLog -Message "Renewing ownership of $($OwnerRecord.Owner) due to last update being greater than threshold $($OwnerRecord.TakeOverThresholdMin)" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+    }
+    
+    $RecordProps.Status = ([HAStatuses]::Running).ToString()
+    $RecordProps.LastUpdateUTC = ([System.DateTime]::UtcNow)
     Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $RecordProps -UpdateExisting
+}
+else
+{
+    Add-TableLog -Message "Exiting due to last update from current owner $($OwnerRecord.Owner) is still whithin threshold ($LastUpdateInMinutes) in minutes" -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+    Exit 0
 }
 
 # Exiting while testing
 # TODO: Remove before final
 Write-Verbose -Verbose "Executing scaling script stuff...."
+Add-TableLog -Message "* $HAOwnerName Executing scaling script stuff...." -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+
+Start-Sleep -Seconds (Get-Random -Minimum 1 -Maximum 900)
+
+Add-TableLog -Message "* $HAOwnerName Completed execution, updating owner info...." -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable
+$RecordProps.LastUpdateUTC = ([System.DateTime]::UtcNow)
+$RecordProps.Status =  ([HAStatuses]::Completed).ToString()
+Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $RecordProps -UpdateExisting
+
 Exit
 #### END PMC
 

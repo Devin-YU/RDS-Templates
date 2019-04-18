@@ -11,6 +11,8 @@ This script depends on two PowerShell modules: Azure RM and Windows Virtual Desk
 PS C:\>Install-Module Az  -AllowClobber
 #>
 
+#Requires -Modules Az.Accounts, Az.Compute, AzTable, Microsoft.RDInfra.RDPowerShell,
+
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $ErrorActionPreference = "Stop"

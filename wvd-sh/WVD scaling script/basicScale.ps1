@@ -7,8 +7,9 @@ This is a sample script for automatically scaling Tenant Environment WVD Host Se
 This script will start/stop Tenant WVD host VMs based on the number of user sessions and peak/off-peak time period specified in the configuration file.
 During the peak hours, the script will start necessary session hosts in the host pool to meet the demands of users.
 During the off-peak hours, the script will shut down session hosts and only keep the minimum number of session hosts.
-This script depends on two PowerShell modules: Azure RM and Windows Virtual Desktop modules. To install Azure RM module execute the following command. Use "-AllowClobber" parameter if you have more than one version of PowerShell modules installed.
+This script depends on two PowerShell modules: Azure RM and Windows Virtual Desktop modules. To install Azure RM module and WVD Module execute the following commands. Use "-AllowClobber" parameter if you have more than one version of PowerShell modules installed.
 PS C:\>Install-Module AzureRM  -AllowClobber
+PS C:\>Install-Module Microsoft.RDInfra.RDPowershell  -AllowClobber
 #>
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -33,14 +34,14 @@ function Write-Log {
     }
     if ($level -le $VerboseLogging) {
       if ($color -match "Red|Yellow") {
-        Write-Host ("{0} - [{1}] {2}" -f $time,$severity,$Message) -ForegroundColor $color -BackgroundColor Black
+        Write-Output ("{0} - [{1}] {2}" -f $time,$severity,$Message) -ForegroundColor $color -BackgroundColor Black
         if ($severity -eq 'Error') {
 
           throw $Message
         }
       }
       else {
-        Write-Host ("{0} - [{1}] {2}" -f $time,$severity,$Message) -ForegroundColor $color
+        Write-Output ("{0} - [{1}] {2}" -f $time,$severity,$Message) -ForegroundColor $color
       }
     }
   }
@@ -125,7 +126,15 @@ $Variable.RDMIScale.Deployment | ForEach-Object { $_.Variable } | Where-Object {
 
 ##### Load functions/module #####
 . $CurrentPath\Functions-PSStoredCredentials.ps1
-Import-Module $CurrentPath\PowershellModules\Microsoft.RdInfra.RdPowershell.dll
+
+
+# Checking WVD Modules are existed or not
+$WVDModules = Get-Module -Name "Microsoft.RDInfra.RDPowershell" -ErrorAction SilentlyContinue
+if(!$WVDModules){
+Install-Module "Microsoft.RDInfra.RDPowershell" -AllowClobber
+}
+
+Import-Module "Microsoft.RDInfra.RDPowershell"
 
 ##### Login with delegated access in WVD tenant #####
 $Credential = Get-StoredCredential -UserName $Username
@@ -166,7 +175,6 @@ catch {
     Write-Log 1 "Failed to authenticate with Azure with a standard account: $($_.exception.message)" "Error"
     exit 1
 }
-
 ##### Set context to the appropriate tenant group #####
 Write-Log  1 "Running switching to the $tenantGroupName context" "Info"
 Set-RdsContext -TenantGroupName $tenantGroupName
@@ -175,6 +183,72 @@ Set-RdsContext -TenantGroupName $tenantGroupName
 Select-AzureRmSubscription -SubscriptionId $currentAzureSubscriptionId
 ##### Construct Begin time and End time for the Peak period #####
 $CurrentDateTime = Get-Date
+#Splitting session load balancing peak hours
+$BeginPeakHour = $sessionLoadBalancingPeakHours.Split("-")[0]
+$EndPeakHour = $sessionLoadBalancingPeakHours.Split("-")[1]
+
+
+$PeakBeginDateTime = [datetime]::Parse($CurrentDateTime.ToShortDateString() + ' ' + $BeginPeakHour)
+
+$PeakEndDateTime = [datetime]::Parse($CurrentDateTime.ToShortDateString() + ' ' + $EndPeakHour)
+
+
+
+        #check the calculated end time is later than begin time in case of time zone
+        if ($PeakEndDateTime -lt $PeakBeginDateTime) {
+          $PeakEndDateTime = $EndPeakDateTime.AddDays(1)
+        }
+
+        #Compare session loadbalancing peak hours and setting up appropriate load balacing type based on PeakLoadBalancingType
+        if ($CurrentDateTime -ge $PeakBeginDateTime -and $CurrentDateTime -le $PeakEndDateTime) {
+
+        Write-Log 3 "Changing Hostpool Load Balance Type: Current Date Time is: $CurrentDateTime" "Info"
+
+                if($PeakLoadBalancingType -eq "DepthFirst")
+                {
+                Write-Log 3 "Hostpool Load balancer Type in Session Load Balancing Peak Hours is '$PeakLoadBalancingType Load Balancing'"
+                Set-RdsHostPool -TenantName $tenantName -Name $hostPoolName -DepthFirstLoadBalancer -MaxSessionLimit $hostpoolInfo.MaxSessionLimit
+                }
+                else
+                {
+                Write-Log 3 "Hostpool Load balancer Type in Session Load Balancing Peak Hours is '$PeakLoadBalancingType Load Balancing'"
+                Set-RdsHostPool -TenantName $tenantName -Name $hostPoolName -BreadthFirstLoadBalancer -MaxSessionLimit $hostpoolInfo.MaxSessionLimit
+                }
+        }
+
+        #Splitting session load balancing off peak hours
+        $BeginOffPeakHour = $sessionLoadBalancingOffPeakHours.Split("-")[0]
+        $EndOffPeakHour = $sessionLoadBalancingOffPeakHours.Split("-")[1]
+
+
+        $OffPeakBeginDateTime = [datetime]::Parse($CurrentDateTime.ToShortDateString() + ' ' + $BeginOffPeakHour)
+
+        $OffPeakEndDateTime = [datetime]::Parse($CurrentDateTime.ToShortDateString() + ' ' + $EndOffPeakHour)
+
+
+        #check the calculated end time is later than begin time in case of time zone
+        if ($OffPeakEndDateTime -lt $OffPeakBeginDateTime) {
+          $OffPeakEndDateTime = $EndPeakDateTime.AddDays(1)
+        }
+
+        #Compare session loadbalancing off peak hours and setting up appropriate load balacing type based on offPeakLoadBalancingType
+        if ($CurrentDateTime -ge $OffPeakBeginDateTime -and $CurrentDateTime -le $OffPeakEndDateTime) {
+
+        Write-Log 3 "Changing Hostpool Load Balance Type: Current Date Time is: $CurrentDateTime" "Info"
+
+                if($OffPeakLoadBalancingType -eq "DepthFirst")
+                {
+                Write-Log 3 "Hostpool Load balancer Type in Session Load Balancing off Peak Hours is '$OffPeakLoadBalancingType Load Balancing' "
+                Set-RdsHostPool -TenantName $tenantName -Name $hostPoolName -DepthFirstLoadBalancer -MaxSessionLimit $hostpoolInfo.MaxSessionLimit
+                }
+                else
+                {
+                Write-Log 3 "Hostpool Load balancer Type in Session Load Balancing off Peak Hours is '$PeakLoadBalancingType Load Balancing'"
+                Set-RdsHostPool -TenantName $tenantName -Name $hostPoolName -BreadthFirstLoadBalancer -MaxSessionLimit $hostpoolInfo.MaxSessionLimit
+                }
+            }
+
+
 Write-Log 3 "Starting WVD Tenant Hosts Scale Optimization: Current Date Time is: $CurrentDateTime" "Info"
 
 $BeginPeakDateTime = [datetime]::Parse($CurrentDateTime.ToShortDateString() + ' ' + $BeginPeakTime)
@@ -201,7 +275,6 @@ Write-Log 1 "$hostPoolName hostpool loadbalancer type is $($hostpoolInfo.LoadBal
       Write-Log 1 "Failed to retrieve sessionhost in hostpool $($hostPoolName) : $($_.exception.message)" "Info"
       exit
     }
-
     if ($hostpoolMaxSessionLimit -le 10) {
         $sessionlimit = $hostpoolMaxSessionLimit - 1
         
@@ -261,7 +334,6 @@ Write-Log 1 "$hostPoolName hostpool loadbalancer type is $($hostpoolInfo.LoadBal
               ##### Wait for the sessionhost is available #####
                 $IsHostAvailable = $false
                 while (!$IsHostAvailable) {
-
                   $hoststatus = Get-RdsSessionHost -TenantName $tenantname -HostPoolName $hostpoolname -Name $sessionHost.sessionhostname
 
                   if ($hoststatus.Status -eq "Available") {
@@ -426,6 +498,14 @@ Write-Log 1 "$hostPoolName hostpool loadbalancer type is $($hostpoolInfo.LoadBal
                 Write-Log 1 "Failed to stop Azure VM: $VMName with error: $_.exception.message" "Info"
                 exit
               }
+            }
+		#ensure the Azure VMs that are off have the AllowNewSession mode set to True
+            try {
+              Set-RdsSessionHost -TenantName $tenantName -HostPoolName $hostPoolName -Name $sessionHost -AllowNewSession $true -ErrorAction SilentlyContinue
+            }
+            catch {
+              Write-Log 1 "Failed to set drain mode on session host: $($sessionHost.SessionHost) with error: $($_.exception.message)" "Error"
+              exit 1
             }
             ##### Decrement number of running session host #####
             $numberOfRunningHost = $numberOfRunningHost - 1

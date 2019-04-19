@@ -1,0 +1,56 @@
+4/19/2019 12:58:18 PM - [Error] Failed to authenticate with Azure with a standard account: An error occurred while sending the request.
+4/19/2019 12:59:40 PM - [Info] ActivityId: 105c1b4f-9750-43d9-b298-a23d8d956e6f - Please use this guid to query this execution on WVDScalingLog table.
+4/19/2019 12:59:43 PM - [Info] Setting up new owner record
+4/19/2019 12:59:43 PM - [Info] LastUpdateInMinutes: 0.00428322
+4/19/2019 12:59:43 PM - [Info] Testing values
+4/19/2019 12:59:43 PM - [Info] ---------------
+4/19/2019 12:59:43 PM - [Info] From Record
+4/19/2019 12:59:43 PM - [Info]     OwnerToken.Owner                           => Home
+4/19/2019 12:59:43 PM - [Info]     OwnerToken.CurrentActivityId               => 105c1b4f-9750-43d9-b298-a23d8d956e6f
+4/19/2019 12:59:43 PM - [Info]     OwnerToken.TakeOverThresholdMin            => 30
+4/19/2019 12:59:43 PM - [Info]     OwnerToken.Status                          => Running
+4/19/2019 12:59:43 PM - [Info]     OwnerToken.LongRunningTakeOverThresholdMin => 120
+4/19/2019 12:59:43 PM - [Info]     OwnerToken.LastUpdateUTC                   => 04/19/2019 12:59:43
+4/19/2019 12:59:44 PM - [Info] From Host
+4/19/2019 12:59:44 PM - [Info]     Owner                         => Home
+4/19/2019 12:59:44 PM - [Info]     ActivityId                    => 105c1b4f-9750-43d9-b298-a23d8d956e6f
+4/19/2019 12:59:44 PM - [Info]     LastUpdateInMinutes           => 0.00428322
+4/19/2019 12:59:44 PM - [Info] (Running) Execution in progress case...
+4/19/2019 12:59:44 PM - [Info] (Running) (UpdateFromOnwer) Home Executing scaling script stuff....
+4/19/2019 12:59:44 PM - [Info]      Processing stuff will take 4788 seconds....
+4/19/2019 1:34:47 PM - [Info] ActivityId: fa48e6e1-7140-4c2c-ba0b-f924fcd295aa - Please use this guid to query this execution on WVDScalingLog table.
+4/19/2019 1:34:52 PM - [Info] LastUpdateInMinutes: 35.1423491283333
+4/19/2019 1:34:52 PM - [Info] Testing values
+4/19/2019 1:34:52 PM - [Info] ---------------
+4/19/2019 1:34:52 PM - [Info] From Record
+4/19/2019 1:34:52 PM - [Info]     OwnerToken.Owner                           => Home
+4/19/2019 1:34:52 PM - [Info]     OwnerToken.CurrentActivityId               => 105c1b4f-9750-43d9-b298-a23d8d956e6f
+4/19/2019 1:34:52 PM - [Info]     OwnerToken.TakeOverThresholdMin            => 30
+4/19/2019 1:34:52 PM - [Info]     OwnerToken.Status                          => Running
+4/19/2019 1:34:52 PM - [Info]     OwnerToken.LongRunningTakeOverThresholdMin => 120
+4/19/2019 1:34:52 PM - [Info]     OwnerToken.LastUpdateUTC                   => 04/19/2019 12:59:43
+4/19/2019 1:34:52 PM - [Info] From Host
+4/19/2019 1:34:52 PM - [Info]     Owner                         => Home
+4/19/2019 1:34:52 PM - [Info]     ActivityId                    => fa48e6e1-7140-4c2c-ba0b-f924fcd295aa
+4/19/2019 1:34:52 PM - [Info]     LastUpdateInMinutes           => 35.1423491283333
+4/19/2019 1:34:52 PM - [Info] (Running) Execution in progress case...
+4/19/2019 1:34:52 PM - [Info] (Running) (ExecInProgressByMe) Exiting due to execution in progress by same owner (Home) and this is a new process
+4/19/2019 1:34:52 PM - [Info] After evaluation, no further execution will take place at Home
+4/19/2019 1:52:47 PM - [Info] ActivityId: c9580f0a-91ae-44af-ab9c-b0c63aae9dd8 - Please use this guid to query this execution on WVDScalingLog table.
+4/19/2019 1:52:51 PM - [Info] LastUpdateInMinutes: 53.1243194666667
+4/19/2019 1:52:51 PM - [Info] Testing values
+4/19/2019 1:52:51 PM - [Info] ---------------
+4/19/2019 1:52:51 PM - [Info] From Record
+4/19/2019 1:52:51 PM - [Info]     OwnerToken.Owner                           => Home
+4/19/2019 1:52:51 PM - [Info]     OwnerToken.CurrentActivityId               => 105c1b4f-9750-43d9-b298-a23d8d956e6f
+4/19/2019 1:52:51 PM - [Info]     OwnerToken.TakeOverThresholdMin            => 30
+4/19/2019 1:52:51 PM - [Info]     OwnerToken.Status                          => Running
+4/19/2019 1:52:51 PM - [Info]     OwnerToken.LongRunningTakeOverThresholdMin => 120
+4/19/2019 1:52:51 PM - [Info]     OwnerToken.LastUpdateUTC                   => 04/19/2019 12:59:43
+4/19/2019 1:52:51 PM - [Info] From Host
+4/19/2019 1:52:51 PM - [Info]     Owner                         => Home
+4/19/2019 1:52:51 PM - [Info]     ActivityId                    => c9580f0a-91ae-44af-ab9c-b0c63aae9dd8
+4/19/2019 1:52:51 PM - [Info]     LastUpdateInMinutes           => 53.1243194666667
+4/19/2019 1:52:51 PM - [Info] (Running) Execution in progress case...
+4/19/2019 1:52:51 PM - [Info] (Running) (ExecInProgressByMe) Exiting due to execution in progress by same owner (Home) and this is a new process
+4/19/2019 1:52:51 PM - [Info] After evaluation, no further execution will take place at Home

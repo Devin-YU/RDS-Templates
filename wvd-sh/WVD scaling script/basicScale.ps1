@@ -11,7 +11,7 @@ This script depends on two PowerShell modules: Azure RM and Windows Virtual Desk
 PS C:\>Install-Module Az  -AllowClobber
 #>
 
-#Requires -Modules Az.Accounts, Az.Compute, AzTable, Microsoft.RDInfra.RDPowerShell
+#Requires -Modules AzTable, Microsoft.RDInfra.RDPowerShell
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -26,7 +26,7 @@ function Write-Log {
     param(
         [int]$level
         , [string]$Message
-        , [ValidateSet("Info", "Warning", "Error")] [string]$severity = 'Info'
+        , [ValidateSet("Info", "InfoHA", "Warning", "Error")] [string]$severity = 'Info'
         , [string]$logname = $rdmiTenantlog
         , [string]$color = "white"
     )
@@ -90,171 +90,7 @@ function Set-ScriptVariable ($Name, $Value) {
     Invoke-Expression ("`$Script:" + $Name + " = `"" + $Value + "`"")
 }
 
-#region StorageTableFunctions
-
-#region Enums
-enum LogLevel
-{
-    Informational
-    Warning
-    Error
-}
-
-enum HAStatuses
-{
-    Running
-    Completed
-    Failed
-}
-
-enum ExecCodes
-{
-    ExecInProgressByOwner
-    ExecInProgressByMe
-    TakeOverThresholdLongRun
-    TakeOverThreshold
-    OwnershipRenewal
-    ExitOwnerWithinThreshold
-    UpdateFromOnwer
-}
 #endregion
-
-function Add-TableLog
-{
-    <#
-        .SYNOPSIS
-            Add a log entry into storage table
-    #>
-    param
-    (
-        [string]$EntityName,
-        [string]$OwnerStatus,
-        [string]$ExecCode,
-        [string]$Message,
-        [logLevel]$Level,
-        [string]$ActivityId,
-        $LogTable
-    )
-
-    $LogTimeStampUTC = ([System.DateTime]::UtcNow)
-
-    # Creating job submission information
-    $logEntryId = [guid]::NewGuid().Guid
-    [hashtable]$logProps = @{ "LogTimeStampUTC"=$LogTimeStampUTC;
-                              "OwnerStatus"=$OwnerStatus;
-                              "ExecCode"=$ExecCode;
-                              "ActivityId"=$ActivityId;
-                              "EntityName"=$EntityName;
-                              "Message"=$message;
-                              "LogLevel"=$level.ToString()}
-
-    Add-AzTableRow -table $logTable -partitionKey $ActivityId -rowKey $logEntryId -property $logProps | Out-null
-}
-
-function GetHaOwnerProperties
-{
-    <#
-        .SYNOPSIS
-            Returns the RecordProperties if script should continue executing
-    #>
-    param
-    (
-        $HaTable,
-        $LogTable,
-        [string]$PartitionKey,
-        [string]$RowKey,
-        [string]$Owner,
-        [int]$TakeOverMin,
-        [int]$LongRunningTakeOverMin,
-        [string]$ActivityId
-
-    )
-
-    # Initializing owner record if it does not exist yet
-    $OwnerRecord = Get-AzTableRow -Table $HaTable -PartitionKey $PartitionKey -RowKey $RowKey
-
-    if ($OwnerRecord -eq $null)
-    {
-        $OwnerProps = @{"Owner"=$Owner;
-                        "LastUpdateUTC"=([System.DateTime]::UtcNow);
-                        "Status"=([HAStatuses]::Running).ToString();
-                        "TakeOverThresholdMin"=$TakeOverMin;
-                        "LongRunningTakeOverThresholdMin"=$LongRunningTakeOverMin;
-                        "CurrentActivityId"=$ActivityId}
-            
-        Add-TableLog -OnwerStatus $OwnerProps.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "Setting up new owner record" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-        Write-Log 3 "Setting up new owner record" "Info"
-        Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerProps | Out-Null
-        $OwnerRecord = Get-AzTableRow -Table $HaTable -PartitionKey $PartitionKey -RowKey $RowKey
-    }
-            
-    $OwnerProps = @{"Owner"=$OwnerRecord.Owner;
-                    "LastUpdateUTC"=([System.DateTime]::UtcNow);
-                    "Status"=$OwnerRecord.Status;
-                    "TakeOverThresholdMin"=$OwnerRecord.TakeOverThresholdMin;
-                    "LongRunningTakeOverThresholdMin"=$OwnerRecord.LongRunningTakeOverThresholdMin;
-                    "CurrentActivityId"=$OwnerRecord.CurrentActivityId}
-
-    # Deciding whether or not move forward, get ownership or exit
-    $LastUpdateInMinutes = (([System.DateTime]::UtcNow).Subtract($OwnerRecord.LastUpdateUTC).TotalMinutes) 
-
-    Write-Verbose -Verbose "LastUpdateInMinutes: $LastUpdateInMinutes"
-    Write-Log 3 "LastUpdateInMinutes: $LastUpdateInMinutes"
-
-    if ($OwnerRecord.Status -eq ([HAStatuses]::Running).ToString())
-    {
-        if(($OwnerRecord.Owner -ne $Owner) -and ($LastUpdateInMinutes -lt $OwnerRecord.LongRunningTakeOverThresholdMin))
-        {
-            Add-TableLog -OnwerStatus $OwnerRecord.Status -ExecCode ([ExecCodes]::ExecInProgressByOwner) -Message "Exiting due to execution in progress by another owner (($($OwnerProps.Owner))" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-            Write-Log 3 "($($OwnerRecord.Status)) ($([ExecCodes]::ExecInProgressByOwner)) Exiting due to execution in progress by another owner (($($OwnerProps.Owner))" "Info"
-            $OwnerProps = $null
-        }
-        elseif (($OwnerRecord.Owner -eq $Owner) -and ($OwnerRecord.CurrentActivityId -ne $ActivityId) -and ($LastUpdateInMinutes -lt $OwnerRecord.OverThresholdMin)) 
-        {
-            Add-TableLog -OnwerStatus $OwnerRecord.Status -ExecCode ([ExecCodes]::ExecInProgressByMe) -Message "Exiting due to execution in progress by same owner ($OwnerRecord.Owner) and this is a new process" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-            Write-Log 3 "($($OwnerRecord.Status)) ($([ExecCodes]::ExecInProgressByMe)) Exiting due to execution in progress by same owner ($OwnerRecord.Owner) and this is a new process" "Info"
-            $OwnerProps = $null
-        }
-        elseif ($LastUpdateInMinutes -gt $OwnerRecord.LongRunningTakeOverThresholdMin)
-        {
-            Add-TableLog -OnwerStatus $OwnerRecord.Status -ExecCode ([ExecCodes]::TakeOverThresholdLongRun) -Message "Taking over from current owner $($OwnerRecord.Owner) due to staleness and last update being greater than long running threshold $($OwnerRecord.LongRunningTakeOverThresholdMin)" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-            Write-Log 3 "($($OwnerRecord.Status)) ($([ExecCodes]::TakeOverThresholdLongRun)) Taking over from current owner $($OwnerRecord.Owner) due to staleness and last update being greater than long running threshold $($OwnerRecord.LongRunningTakeOverThresholdMin)" "Info"
-            $OwnerProps.Status = ([HAStatuses]::Running).ToString()
-            $OwnerProps.LastUpdateUTC = ([System.DateTime]::UtcNow)
-            Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerProps -UpdateExisting | Out-Null
-        }
-    }
-    elseif ($LastUpdateInMinutes -gt $OwnerRecord.TakeOverThresholdMin) 
-    {
-        if ($OwnerRecord.Owner -ne $Owner)
-        {
-            Add-TableLog -OnwerStatus $OwnerRecord.Status -ExecCode ([ExecCodes]::TakeOverThreshold) -Message "Taking over from current owner $($OwnerRecord.Owner) due to last update being greater than threshold $($OwnerRecord.TakeOverThresholdMin)" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-            Write-Log 3 "($($OwnerRecord.Status)) ($([ExecCodes]::TakeOverThreshold)) Taking over from current owner $($OwnerRecord.Owner) due to last update being greater than threshold $($OwnerRecord.TakeOverThresholdMin)" "Info"
-        }
-        else
-        {
-            Add-TableLog -OnwerStatus $OwnerRecord.Status -ExecCode ([ExecCodes]::OwnershipRenewal) -Message "Renewing ownership of $($OwnerRecord.Owner) due to last update being greater than threshold $($OwnerRecord.TakeOverThresholdMin)" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-            Write-Log 3 "($($OwnerRecord.Status)) ($([ExecCodes]::OwnershipRenewal)) Renewing ownership of $($OwnerRecord.Owner) due to last update being greater than threshold $($OwnerRecord.TakeOverThresholdMin)" "Info"
-        }
-        
-        $OwnerProps.Status = ([HAStatuses]::Running).ToString()
-        $OwnerProps.LastUpdateUTC = ([System.DateTime]::UtcNow)
-        Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerProps -UpdateExisting | Out-Null
-    }
-    else
-    {
-        Add-TableLog -OnwerStatus $OwnerProps.Status -ExecCode ([ExecCodes]::ExitOwnerWithinThreshold) -Message "Exiting due to last update from current owner $($OwnerRecord.Owner) is still within threshold ($LastUpdateInMinutes) in minutes" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-        Write-Log 3 "($($OwnerRecord.Status)) ($([ExecCodes]::ExitOwnerWithinThreshold)) Exiting due to last update from current owner $($OwnerRecord.Owner) is still within threshold ($LastUpdateInMinutes) in minutes" "Info"
-        $OwnerProps = $null
-    }
-
-    return $OwnerProps
-}
-
-
-#endregion
-#endregion
-
 
 $CurrentPath = Split-Path $script:MyInvocation.MyCommand.Path
 
@@ -303,6 +139,7 @@ Write-Verbose -Verbose ""
 Import-Module AzTable
 Import-Module Microsoft.RdInfra.RdPowershell
 . $CurrentPath\Functions-PSStoredCredentials.ps1
+. $CurrentPath\ScalingScriptHACoreHelper.ps1
 
 ##### Login with delegated access in WVD tenant #####
 $Credential = Get-StoredCredential -UserName $Username
@@ -362,17 +199,17 @@ elseif ($ScalingLogTable -eq $null)
 }
 
 # Testing if executing should continue due to Ha
-$RecordProps = GetHaOwnerProperties -PartitionKey $PartitionKey `
-                                    -RowKey $RowKey `
-                                    -HaTable $ScalingHATable `
-                                    -LogTable $ScalingLogTable `
-                                    -Owner $HAOwnerName `
-                                    -TakeOverMin $TakeOverThresholdMin `
-                                    -LongRunningTakeOverMin $LongRunningTakeOverThresholdMin `
-                                    -ActivityId $ActivityId
+$OwnerToken = GetHaOwnerToken -PartitionKey $PartitionKey `
+                              -RowKey $RowKey `
+                              -HaTable $ScalingHATable `
+                              -LogTable $ScalingLogTable `
+                              -Owner $HAOwnerName `
+                              -TakeOverMin $TakeOverThresholdMin `
+                              -LongRunningTakeOverMin $LongRunningTakeOverThresholdMin `
+                              -ActivityId $ActivityId
 
-Write-Verbose -Verbose "OwnerProps returned: $($RecordProps | Out-String)"
-if ($RecordProps -eq $null)
+Write-Verbose -Verbose "OwnerToken returned: $($OwnerToken.GetPropertiesAsHashTable() | Out-String)"
+if ($OwnerToken.ShouldExit)
 {
     Write-Verbose -Verbose "!!!! After evaluation, no further execution will take place at $HAOwnerName"
     Write-Log 3 "After evaluation, no further execution will take place at $HAOwnerName" "Info"
@@ -382,23 +219,26 @@ if ($RecordProps -eq $null)
 # TODO: Remove before final
 # Exiting while testing
 Write-Verbose -Verbose "Executing scaling script stuff...."
-Add-TableLog -OnwerStatus $RecordProps.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* $HAOwnerName Executing scaling script stuff...." -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable | Out-null
-Write-Log 3 "($($OwnerProps.Status)) ($([ExecCodes]::UpdateFromOnwer)) $HAOwnerName Executing scaling script stuff...." "Info"
+Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($HAOwnerName`) Executing scaling script stuff...." -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable | Out-null
+Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $HAOwnerName Executing scaling script stuff...." "Info"
 
 $seconds = (Get-random -Minimum (2*60) -Maximum (120*60))
 Write-Verbose -Verbose "     Processing stuff will take $seconds seconds...."
 Write-Log 3 "     Processing stuff will take $seconds seconds...." "Info"
 Start-Sleep -Seconds $seconds
 
-$RecordProps.LastUpdateUTC = ([System.DateTime]::UtcNow)
-$RecordProps.Status =  ([HAStatuses]::Completed).ToString()
-Add-TableLog -OnwerStatus $RecordProps.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* $HAOwnerName Completed execution, updating owner info...." -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable | Out-null
-Write-Log 3 "($($OwnerProps.Status)) ($([ExecCodes]::UpdateFromOnwer)) $HAOwnerName Completed execution, updating owner info...." "Info"
+$OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
+$OwnerToken.Status =  [HAStatuses]::Completed
+Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($HAOwnerName`) Completed execution, updating owner info...." -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable | Out-null
+Write-Log 3 "`($($RecordProps.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $HAOwnerName Completed execution, updating owner info...." "Info"
 
-Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $RecordProps -UpdateExisting | Out-null
+Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-null
 
 Exit 0
 #### END PMC
+
+
+
 
 
 

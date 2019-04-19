@@ -34,6 +34,7 @@ enum ExecCodes
     ExitOwnerWithinThreshold
     UpdateFromOnwer
     NoLongerOwner
+    ErrorGettingUpdatedOwnerInfo
 }
 
 class PsOwnerToken
@@ -261,7 +262,7 @@ function UpateOwnerToken
         [PsOwnerToken]$OwnerToken
     )
 
-    $LatestOwnerToken = GetHaOwnerTokenINfo -PartitionKey $PartitionKey -RowKey $RowKey -HaTable $ScalingHATable
+    $LatestOwnerToken = GetHaOwnerTokenINfo -PartitionKey $PartitionKey -RowKey $RowKey -HaTable $HaTable
 
     if ($LatestOwnerToken -ne $null)
     {
@@ -269,14 +270,18 @@ function UpateOwnerToken
         {
             $OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
             $OwnerToken.Status =  $OwnerToken.Status
-            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($($OwnerToken.Owner)`) Completed execution, updating owner info...." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $ScalingLogTable | Out-null
+            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($($OwnerToken.Owner)`) Completed execution, updating owner info...." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $LogTable | Out-null
             Write-Log 3 "`($($OwnerToke.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $($OwnerToken.Owner) Completed execution, updating owner info...." "Info"
             
             Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-null
         }
         else
         {
-            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::NoLongerOwner) -Message "* `($($OwnerToken.Owner)`) completed execution but no longer owner, current owner is $($LatestOwnerToken.Owner), will not update Ha Table." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $ScalingLogTable | Out-null
+            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::NoLongerOwner) -Message "* `($($OwnerToken.Owner)`) completed execution but no longer owner, current owner is $($LatestOwnerToken.Owner), will not update Ha Table." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $LogTable | Out-null
         }
+    }
+    else
+    {
+        Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::ErrorGettingUpdatedOwnerInfo) -Message "* `($($OwnerToken.Owner)`) completed execution but could not obtain latest owner record." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $LogTable | Out-null
     }
 }

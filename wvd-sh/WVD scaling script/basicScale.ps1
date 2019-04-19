@@ -222,7 +222,7 @@ Write-Verbose -Verbose "Executing scaling script stuff...."
 Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($HAOwnerName`) Executing scaling script stuff...." -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable | Out-null
 Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $HAOwnerName Executing scaling script stuff...." "Info"
 
-$seconds = (Get-random -Minimum (2*60) -Maximum (120*60))
+$seconds = (Get-random -Minimum (1*60) -Maximum (16*60))
 Write-Verbose -Verbose "     Processing stuff will take $seconds seconds...."
 Write-Log 3 "     Processing stuff will take $seconds seconds...." "Info"
 Start-Sleep -Seconds $seconds

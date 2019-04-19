@@ -227,12 +227,11 @@ Write-Verbose -Verbose "     Processing stuff will take $seconds seconds...."
 Write-Log 3 "     Processing stuff will take $seconds seconds...." "Info"
 Start-Sleep -Seconds $seconds
 
-$OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
-$OwnerToken.Status =  [HAStatuses]::Completed
-Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($HAOwnerName`) Completed execution, updating owner info...." -EntityName $HAOwnerName -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $ScalingLogTable | Out-null
-Write-Log 3 "`($($RecordProps.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $HAOwnerName Completed execution, updating owner info...." "Info"
 
-Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-null
+#TODO: Check if I'm still owner due to long running and don't update if not
+# Update token if applicable
+$OwnerToken.Satus = [HAStatuses]::Completed
+UpdateOwnerToken -HaTable $ScalingHATable -LogTable $ScalingLogTable -PartitionKey $PartitionKey -RowKey $RowKey -OwnerToken $OwnerToken
 
 Exit 0
 #### END PMC

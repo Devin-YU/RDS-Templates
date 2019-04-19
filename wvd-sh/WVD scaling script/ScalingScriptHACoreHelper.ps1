@@ -33,6 +33,7 @@ enum ExecCodes
     OwnershipRenewal
     ExitOwnerWithinThreshold
     UpdateFromOnwer
+    NoLongerOwner
 }
 
 class PsOwnerToken
@@ -109,11 +110,38 @@ function Add-TableLog
     Add-AzTableRow -table $logTable -partitionKey $ActivityId -rowKey $logEntryId -property $logProps | Out-null
 }
 
+
+function GetHaOwnerTokenInfo
+{
+    <#
+    .SYNOPSIS
+        Returns current values of OwnerToken
+    #>
+    param
+    (
+        $HaTable,
+        [string]$PartitionKey,
+        [string]$RowKey,
+        [string]$Owner
+    )
+
+    # Initializing owner record if it does not exist yet
+    $OwnerToken = $nul
+    $OwnerRow = Get-AzTableRow -Table $HaTable -PartitionKey $PartitionKey -RowKey $RowKey
+
+    if ($OwnerRow -ne $null)
+    {
+        $OwnerToken = [PSOwnerToken]::new($OwnerRow.Owner,$OwnerRow.LastUpdateUTC,$OwnerRow.Status,$OwnerRow.TakeOverThresholdMin,$OwnerRow.LongRunningTakeOverThresholdMin,$OwnerRow.CurrentActivityId)
+    }
+
+    return $OwnerToken
+}
+
 function GetHaOwnerToken
 {
     <#
     .SYNOPSIS
-        Returns the RecordProperties if script should continue executing
+        Returns the OwnerToken, upadtes the ha table and set value of ShouldExit
     #>
     param
     (
@@ -125,7 +153,6 @@ function GetHaOwnerToken
         [int]$TakeOverMin,
         [int]$LongRunningTakeOverMin,
         [string]$ActivityId
-
     )
 
     RandomizeStartDelay
@@ -187,6 +214,7 @@ function GetHaOwnerToken
             Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::TakeOverThresholdLongRun)`) Taking over from current owner $($OwnerToken.Owner) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" "Info"
             $OwnerToken.Status = [HAStatuses]::Running
             $OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
+            $OwnerToken.CurrentActivityId = $ActivityId
             Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-Null
         }
     }
@@ -205,6 +233,7 @@ function GetHaOwnerToken
         
         $OwnerToken.Status = [HAStatuses]::Running
         $OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
+        $OwnerToken.CurrentActivityId = $ActivityId
         Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-Null
     }
     else
@@ -217,3 +246,37 @@ function GetHaOwnerToken
     return $OwnerToken
 }
 
+function UpateOwnerToken
+{
+    <#
+    .SYNOPSIS
+        Updates OwnerToken if still owner
+    #>
+    param
+    (
+        $HaTable,
+        $LogTable,
+        [string]$PartitionKey,
+        [string]$RowKey,
+        [PsOwnerToken]$OwnerToken
+    )
+
+    $LatestOwnerToken = GetHaOwnerTokenINfo -PartitionKey $PartitionKey -RowKey $RowKey -HaTable $ScalingHATable
+
+    if ($LatestOwnerToken -ne $null)
+    {
+        if ($LatestOwnerToken.Owner -eq $OwnerToken.Owner)
+        {
+            $OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
+            $OwnerToken.Status =  $OwnerToken.Status
+            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($($OwnerToken.Owner)`) Completed execution, updating owner info...." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $ScalingLogTable | Out-null
+            Write-Log 3 "`($($OwnerToke.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $($OwnerToken.Owner) Completed execution, updating owner info...." "Info"
+            
+            Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-null
+        }
+        else
+        {
+            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::NoLongerOwner) -Message "* `($($OwnerToken.Owner)`) completed execution but no longer owner, current owner is $($LatestOwnerToken.Owner), will not update Ha Table." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $ScalingLogTable | Out-null
+        }
+    }
+}

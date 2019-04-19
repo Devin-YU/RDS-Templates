@@ -199,6 +199,8 @@ $PeakEndDateTime = [datetime]::Parse($CurrentDateTime.ToShortDateString() + ' ' 
           $PeakEndDateTime = $EndPeakDateTime.AddDays(1)
         }
 
+        $hostpoolInfo = Get-RdsHostPool -TenantName $tenantName -Name $hostPoolName
+
         #Compare session loadbalancing peak hours and setting up appropriate load balacing type based on PeakLoadBalancingType
         if ($CurrentDateTime -ge $PeakBeginDateTime -and $CurrentDateTime -le $PeakEndDateTime) {
 

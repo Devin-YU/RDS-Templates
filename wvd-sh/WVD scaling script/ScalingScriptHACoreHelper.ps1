@@ -69,13 +69,18 @@ class PsOwnerToken
     }
 }
 
-function RandomizeStartDelay
+function RandomizedDelay
 {
+    param
+    (
+        [int]$MinimumMs=500,
+        [int]$MaximumMs=2000
+    )
     
     # Randomizing start
     [int]$TicksSubset = (Get-Date).Ticks.Tostring().Substring((Get-Date).Ticks.ToString().Length-9)
     [int]$PSProcessId = (Get-Process powershell | Sort-Object cpu -Descending )[0].id
-    [int]$RandomMs = (Get-Random -SetSeed ($TicksSubset+$PSProcessId) -Minimum 500 -Maximum 2000)
+    [int]$RandomMs = (Get-Random -SetSeed ($TicksSubset+$PSProcessId) -Minimum $MinimumMs -Maximum $MaximumMs)
     Start-Sleep -Milliseconds $RandomMs
 }
 
@@ -127,7 +132,7 @@ function GetHaOwnerTokenInfo
     )
 
     # Initializing owner record if it does not exist yet
-    $OwnerToken = $nul
+    $OwnerToken = $null
     $OwnerRow = Get-AzTableRow -Table $HaTable -PartitionKey $PartitionKey -RowKey $RowKey
 
     if ($OwnerRow -ne $null)
@@ -156,22 +161,32 @@ function GetHaOwnerToken
         [string]$ActivityId
     )
 
-    RandomizeStartDelay
-
     # Initializing owner record if it does not exist yet
+    RandomizedDelay -MinimumMs 1000 -MaximumMs 3000
+
     $OwnerRow = Get-AzTableRow -Table $HaTable -PartitionKey $PartitionKey -RowKey $RowKey
 
     if ($OwnerRow -eq $null)
     {
         $OwnerToken = [PSOwnerToken]::new($Owner,([datetime]::UtcNow),[HAStatuses]::Running,$TakeOverMin,$LongRunningTakeOverMin,$ActivityId)
-            
-        Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "Setting up new owner record" -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToke.ActivityId -LogTable $LogTable | Out-Null
-        Write-Log 3 "Setting up new owner record" "Info"
         Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() | Out-Null
+        Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "Created new owner record" -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToke.ActivityId -LogTable $LogTable | Out-Null
+        Write-Log 3 "Created new owner record" "Info"
     }
     else
     {
         $OwnerToken = [PSOwnerToken]::new($OwnerRow.Owner,$OwnerRow.LastUpdateUTC,$OwnerRow.Status,$OwnerRow.TakeOverThresholdMin,$OwnerRow.LongRunningTakeOverThresholdMin,$OwnerRow.CurrentActivityId)
+    }
+
+    # Check last time if it is still owner
+    RandomizedDelay -MinimumMs 1000 -MaximumMs 3000
+    $LatestOwnerToken = GetHaOwnerTokenINfo -PartitionKey $PartitionKey -RowKey $RowKey -HaTable $HaTable
+    if ($LatestOwnerToken -ne $null)
+    {
+        if ($LatestOwnerToken.Owner -ne $OwnerToken.Owner)
+        {
+            $OwnerToken = $LatestOwnerToken
+        }
     }
 
     # Deciding whether or not move forward, get ownership or exit
@@ -211,12 +226,14 @@ function GetHaOwnerToken
         }
         elseif ($LastUpdateInMinutes -gt $OwnerToken.LongRunningTakeOverThresholdMin)
         {
-            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::TakeOverThresholdLongRun) -Message "Taking over from current owner $($OwnerToken.Owner) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-            Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::TakeOverThresholdLongRun)`) Taking over from current owner $($OwnerToken.Owner) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" "Info"
             $OwnerToken.Status = [HAStatuses]::Running
             $OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
             $OwnerToken.CurrentActivityId = $ActivityId
+            $OwnerToken.Owner = $Owner
             Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-Null
+
+            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::TakeOverThresholdLongRun) -Message "Taking over from current owner $($OwnerToken.Owner) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
+            Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::TakeOverThresholdLongRun)`) Taking over from current owner $($OwnerToken.Owner) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" "Info"
         }
     }
     elseif ($LastUpdateInMinutes -gt $OwnerToken.TakeOverThresholdMin) 
@@ -235,6 +252,7 @@ function GetHaOwnerToken
         $OwnerToken.Status = [HAStatuses]::Running
         $OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
         $OwnerToken.CurrentActivityId = $ActivityId
+        $OwnerToken.Owner = $Owner
         Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-Null
     }
     else
@@ -264,24 +282,31 @@ function UpateOwnerToken
 
     $LatestOwnerToken = GetHaOwnerTokenINfo -PartitionKey $PartitionKey -RowKey $RowKey -HaTable $HaTable
 
+    Write-Log 3 "......Updating OwnerToken, latest info: $($LatestOwnerToken.GetPropertiesAsHashTable() | Out-String)" "Info"
+    Write-Log 3 "......Passed OwnerToken for comparison, latest info: $($OwnerToken.GetPropertiesAsHashTable() | Out-String)" "Info"
+    
     if ($LatestOwnerToken -ne $null)
     {
+        Write-Log 3 "......LatestOwnerToken is not null" "Info"
+
         if ($LatestOwnerToken.Owner -eq $OwnerToken.Owner)
         {
             $OwnerToken.LastUpdateUTC = [System.DateTime]::UtcNow
             $OwnerToken.Status =  $OwnerToken.Status
-            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($($OwnerToken.Owner)`) Completed execution, updating owner info...." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $LogTable | Out-null
-            Write-Log 3 "`($($OwnerToke.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $($OwnerToken.Owner) Completed execution, updating owner info...." "Info"
-            
             Add-AzTableRow -table $ScalingHATable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-null
+
+            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::UpdateFromOnwer) -Message "* `($($OwnerToken.Owner)`) Completed execution, updating owner info...." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $LogTable | Out-null
+            Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $($OwnerToken.Owner) Completed execution, updating owner info...." "Info"            
         }
         else
         {
+            Write-Log 3 "......Owner was demoted" "Info"
             Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::NoLongerOwner) -Message "* `($($OwnerToken.Owner)`) completed execution but no longer owner, current owner is $($LatestOwnerToken.Owner), will not update Ha Table." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $LogTable | Out-null
         }
     }
     else
     {
+        Write-Log 3 "......Could not obtain current owner info" "Info"
         Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::ErrorGettingUpdatedOwnerInfo) -Message "* `($($OwnerToken.Owner)`) completed execution but could not obtain latest owner record." -EntityName $OwnerToken.Owner -Level ([LogLevel]::Informational) -ActivityId $OwnerToken.ActivityId -LogTable $LogTable | Out-null
     }
 }

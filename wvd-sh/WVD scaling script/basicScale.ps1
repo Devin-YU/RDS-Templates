@@ -230,7 +230,7 @@ Start-Sleep -Seconds $seconds
 
 #TODO: Check if I'm still owner due to long running and don't update if not
 # Update token if applicable
-$OwnerToken.Satus = [HAStatuses]::Completed
+$OwnerToken.Status = [HAStatuses]::Completed
 UpdateOwnerToken -HaTable $ScalingHATable -LogTable $ScalingLogTable -PartitionKey $PartitionKey -RowKey $RowKey -OwnerToken $OwnerToken
 
 Exit 0

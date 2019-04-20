@@ -162,7 +162,7 @@ function GetHaOwnerToken
     )
 
     # Initializing owner record if it does not exist yet
-    RandomizedDelay -MinimumMs 1000 -MaximumMs 3000
+    RandomizedDelay -MinimumMs 1000 -MaximumMs 10000
 
     $OwnerRow = Get-AzTableRow -Table $HaTable -PartitionKey $PartitionKey -RowKey $RowKey
 
@@ -179,7 +179,7 @@ function GetHaOwnerToken
     }
 
     # Check last time if it is still owner
-    RandomizedDelay -MinimumMs 1000 -MaximumMs 3000
+    RandomizedDelay -MinimumMs 1000 -MaximumMs 10000
     $LatestOwnerToken = GetHaOwnerTokenINfo -PartitionKey $PartitionKey -RowKey $RowKey -HaTable $HaTable
     if ($LatestOwnerToken -ne $null)
     {
@@ -232,8 +232,8 @@ function GetHaOwnerToken
             $OwnerToken.Owner = $Owner
             Add-AzTableRow -table $HaTable -partitionKey $PartitionKey -rowKey $RowKey -property $OwnerToken.GetPropertiesAsHashTable() -UpdateExisting | Out-Null
 
-            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::TakeOverThresholdLongRun) -Message "Taking over from current owner $($OwnerToken.Owner) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
-            Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::TakeOverThresholdLongRun)`) Taking over from current owner $($OwnerToken.Owner) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" "Info"
+            Add-TableLog -OwnerStatus $OwnerToken.Status -ExecCode ([ExecCodes]::TakeOverThresholdLongRun) -Message "Taking over from current owner `($($OwnerToken.Owner)`) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" -EntityName $Owner -Level ([LogLevel]::Informational) -ActivityId $ActivityId -LogTable $LogTable | Out-Null
+            Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::TakeOverThresholdLongRun)`) Taking over from current owner `($($OwnerToken.Owner)`) due to staleness and last update being greater than long running threshold $($OwnerToken.LongRunningTakeOverThresholdMin)" "Info"
         }
     }
     elseif ($LastUpdateInMinutes -gt $OwnerToken.TakeOverThresholdMin) 
@@ -265,7 +265,7 @@ function GetHaOwnerToken
     return $OwnerToken
 }
 
-function UpateOwnerToken
+function UpdateOwnerToken
 {
     <#
     .SYNOPSIS

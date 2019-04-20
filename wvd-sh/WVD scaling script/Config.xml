@@ -4,8 +4,8 @@
   <Azure>
     <!-- HA Settings -->
     <Variable Name="HAOwnerName" Value="Home"/> <!-- Can have any arbitrary name but unique within the scaling infra, it can be hostname or region name for example --> 
-    <Variable Name="TakeOverThresholdMin" Value="7"/> <!-- Threshold in min to be tested by each scaling node before one takes over -->
-    <Variable Name="LongRunningTakeOverThresholdMin" Value="15"/> <!-- Threshold in min to be tested by each scaling node before one takes over -->
+    <Variable Name="TakeOverThresholdMin" Value="30"/> <!-- Threshold in min to be tested by each scaling node before one takes over -->
+    <Variable Name="LongRunningTakeOverThresholdMin" Value="180"/> <!-- Threshold in min to be tested by each scaling node before one takes over -->
     <Variable Name="StorageAccountRG" Value="Support-rg"/> <!-- Storage account resource group -->
     <Variable Name="StorageAccountName" Value="pmcstorage07"/> <!-- Storage account that hosts the scaling tables (HA and Log) -->
     

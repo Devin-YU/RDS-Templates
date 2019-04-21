@@ -224,6 +224,9 @@ Write-Log 3 "`($($OwnerToken.Status)`) `($([ExecCodes]::UpdateFromOnwer)`) $HAOw
 
 $seconds = (Get-random -Minimum (1*60) -Maximum (16*60))
 Write-Verbose -Verbose "     Processing stuff will take $seconds seconds...."
+
+# TODO: Before any real activity, check if it is still owner, exit if not owner anymore
+
 Write-Log 3 "     Processing stuff will take $seconds seconds...." "Info"
 Start-Sleep -Seconds $seconds
 
